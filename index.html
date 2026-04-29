@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0d0d0d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="OpenClaw">
+  <title>OpenClaw Agent</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- SCREEN: Login -->
+  <div id="screen-login" class="screen active">
+    <div class="login-bg">
+      <div class="orb orb1"></div>
+      <div class="orb orb2"></div>
+      <div class="orb orb3"></div>
+    </div>
+    <div class="login-content">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+            <path d="M18 3L33 12V24L18 33L3 24V12L18 3Z" stroke="#e8ff47" stroke-width="1.5" fill="none"/>
+            <path d="M18 9L27 14.5V25.5L18 31L9 25.5V14.5L18 9Z" fill="#e8ff47" fill-opacity="0.15"/>
+            <circle cx="18" cy="18" r="4" fill="#e8ff47"/>
+          </svg>
+        </div>
+        <h1 class="brand-name">OpenClaw</h1>
+        <p class="brand-sub">Agent Control</p>
+      </div>
+
+      <!-- STEP 1: Usuario y contraseña -->
+      <div id="login-credentials" class="login-card">
+        <p class="login-label">Acceso</p>
+        <div class="input-wrap">
+          <input type="text" id="user-input" placeholder="Usuario" autocomplete="username" spellcheck="false">
+        </div>
+        <div class="input-wrap" style="margin-top:12px">
+          <input type="password" id="pass-input" placeholder="Contraseña" autocomplete="current-password">
+          <button class="input-toggle" onclick="togglePassword('pass-input', this)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+        <button class="btn-primary" onclick="handleCredentials()">
+          <span>Entrar</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+
+      <!-- STEP 2: Gateway Token + URL (solo primera vez) -->
+      <div id="login-setup" class="login-card" style="display:none">
+        <p class="login-label">Configuración del agente</p>
+        <div class="input-wrap">
+          <input type="password" id="token-input" placeholder="Gateway Token..." autocomplete="off" spellcheck="false">
+          <button class="input-toggle" onclick="togglePassword('token-input', this)">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+        </div>
+        <div class="input-wrap" style="margin-top:12px">
+          <input type="url" id="url-input" placeholder="http://IP:48001" autocomplete="off">
+        </div>
+        <button class="btn-primary" onclick="handleLogin()">
+          <span>Conectar</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+        <p class="login-hint">Solo se pide una vez · se guarda en este dispositivo</p>
+      </div>
+
+      <div id="login-biometric" class="login-card" style="display:none">
+        <div class="bio-ring" onclick="handleBiometric()">
+          <div class="bio-icon">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#e8ff47" stroke-width="1.5">
+              <path d="M12 2C9.243 2 7 4.243 7 7v4H5v11h14V11h-2V7c0-2.757-2.243-5-5-5zm0 2c1.654 0 3 1.346 3 3v4H9V7c0-1.654 1.346-3 3-3z"/>
+            </svg>
+          </div>
+        </div>
+        <p class="bio-label">Toca para desbloquear</p>
+        <button class="btn-ghost" onclick="showTokenLogin()">Usar token</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCREEN: Main App -->
+  <div id="screen-app" class="screen">
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="agent-dot" id="agent-dot"></div>
+        <span class="agent-name">OpenClaw</span>
+      </div>
+      <div class="header-right">
+        <button class="icon-btn" onclick="showScreen('panel')" title="Panel">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        </button>
+        <button class="icon-btn" onclick="logout()" title="Salir">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Tab Bar -->
+    <nav class="tab-bar">
+      <button class="tab active" data-tab="chat" onclick="switchTab('chat', this)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        <span>Chat</span>
+      </button>
+      <button class="tab" data-tab="skills" onclick="switchTab('skills', this)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+        <span>Skills</span>
+      </button>
+      <button class="tab" data-tab="panel" onclick="switchTab('panel', this)">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg>
+        <span>Panel</span>
+      </button>
+    </nav>
+
+    <!-- CHAT TAB -->
+    <div id="tab-chat" class="tab-content active">
+      <div class="messages" id="messages">
+        <div class="msg-system">
+          <span>Conectado a tu agente OpenClaw</span>
+        </div>
+      </div>
+      <div class="composer">
+        <div class="composer-inner">
+          <button class="composer-btn voice-btn" id="voice-btn" onclick="toggleVoice()">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/></svg>
+          </button>
+          <textarea id="msg-input" placeholder="Escribe un mensaje..." rows="1" onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+          <button class="composer-btn send-btn" onclick="sendMessage()">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          </button>
+        </div>
+        <div id="voice-indicator" class="voice-indicator" style="display:none">
+          <div class="voice-waves">
+            <span></span><span></span><span></span><span></span><span></span>
+          </div>
+          <span class="voice-label">Escuchando...</span>
+          <button class="voice-cancel" onclick="cancelVoice()">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SKILLS TAB -->
+    <div id="tab-skills" class="tab-content">
+      <div class="tab-inner">
+        <div class="section-header">
+          <h2>Skills activas</h2>
+          <span id="skills-count" class="badge">-</span>
+        </div>
+        <div id="skills-list" class="skills-grid">
+          <div class="loading-state">
+            <div class="spinner"></div>
+            <p>Cargando skills...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PANEL TAB -->
+    <div id="tab-panel" class="tab-content">
+      <div class="tab-inner">
+        <div class="section-header">
+          <h2>Estado del agente</h2>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span class="stat-label">Estado</span>
+            <span class="stat-value" id="stat-status">—</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Modelo</span>
+            <span class="stat-value" id="stat-model">—</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Sesiones</span>
+            <span class="stat-value" id="stat-sessions">—</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Skills</span>
+            <span class="stat-value" id="stat-skills">—</span>
+          </div>
+        </div>
+
+        <div class="section-header" style="margin-top:24px">
+          <h2>Conexión</h2>
+        </div>
+        <div class="info-card">
+          <div class="info-row">
+            <span class="info-label">URL del agente</span>
+            <span class="info-value mono" id="info-url">—</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Biometría</span>
+            <span class="info-value" id="info-bio">—</span>
+          </div>
+        </div>
+
+        <button class="btn-danger" onclick="logout()" style="margin-top:32px">
+          Cerrar sesión y borrar datos
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast" class="toast"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
