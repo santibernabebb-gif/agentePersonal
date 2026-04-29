@@ -15,7 +15,7 @@
 </head>
 <body>
 
-  <!-- SCREEN: Login -->
+  <!-- LOGIN -->
   <div id="screen-login" class="screen active">
     <div class="login-bg">
       <div class="orb orb1"></div>
@@ -34,7 +34,6 @@
         <h1 class="brand-name">OpenClaw</h1>
         <p class="brand-sub">Agent Control</p>
       </div>
-
       <div class="login-card">
         <p class="login-label">Acceso</p>
         <div class="input-wrap">
@@ -42,7 +41,7 @@
         </div>
         <div class="input-wrap" style="margin-top:12px">
           <input type="password" id="pass-input" placeholder="Contraseña" autocomplete="current-password">
-          <button class="input-toggle" onclick="togglePassword('pass-input', this)">
+          <button class="input-toggle" onclick="togglePassword('pass-input')">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
         </div>
@@ -54,58 +53,42 @@
     </div>
   </div>
 
-  <!-- SCREEN: Setup -->
+  <!-- SETUP — solo informativo, sin campos de IP ni token -->
   <div id="screen-setup" class="screen">
     <div class="setup-header">
-      <button class="icon-btn" id="setup-back-btn" onclick="closeSetup()" style="display:none">
+      <button class="icon-btn" id="setup-back-btn" onclick="closeSetup()">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
       </button>
-      <h2 class="setup-title">Configuración</h2>
+      <h2 class="setup-title">Info del sistema</h2>
     </div>
     <div class="setup-content">
-
       <div class="setup-section">
-        <p class="setup-section-title">Conexión con OpenClaw</p>
-        <p class="setup-section-desc">Introduce los datos de tu VPS donde está instalado OpenClaw</p>
+        <p class="setup-section-title">Arquitectura</p>
+        <p class="setup-section-desc">La app conecta de forma segura a través de Cloudflare. La IP y el token de tu VPS nunca se guardan en el dispositivo.</p>
       </div>
-
-      <div class="setup-field">
-        <label class="field-label">IP de tu VPS</label>
-        <input type="text" id="setup-ip" placeholder="185.23.45.67" autocomplete="off" spellcheck="false">
-        <p class="field-hint">Solo la IP, sin http ni puerto</p>
-      </div>
-
-      <div class="setup-field">
-        <label class="field-label">Puerto</label>
-        <input type="number" id="setup-port" placeholder="48001" value="48001" autocomplete="off">
-        <p class="field-hint">Por defecto es 48001</p>
-      </div>
-
-      <div class="setup-field">
-        <label class="field-label">Gateway Token</label>
-        <div class="input-wrap">
-          <input type="password" id="setup-token" placeholder="Tu token de OpenClaw..." autocomplete="off" spellcheck="false">
-          <button class="input-toggle" onclick="togglePassword('setup-token', this)">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-          </button>
+      <div class="info-card">
+        <div class="info-row">
+          <span class="info-label">Proxy</span>
+          <span class="info-value mono">Cloudflare Worker</span>
         </div>
-        <p class="field-hint">En tu VPS → Docker Manager → Token de gateway</p>
+        <div class="info-row">
+          <span class="info-label">Backend</span>
+          <span class="info-value mono">agent-api (VPS)</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Agente</span>
+          <span class="info-value mono">OpenClaw WS</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Sesión</span>
+          <span class="info-value mono">Solo en memoria</span>
+        </div>
       </div>
-
-      <button class="btn-primary" onclick="saveSetup()">
-        <span>Guardar y conectar</span>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-      </button>
-
-      <div class="setup-status" id="setup-status" style="display:none">
-        <div class="spinner"></div>
-        <span>Comprobando conexión...</span>
-      </div>
-
+      <button class="btn-danger" onclick="logout()" style="margin-top:8px">Cerrar sesión</button>
     </div>
   </div>
 
-  <!-- SCREEN: Main App -->
+  <!-- APP -->
   <div id="screen-app" class="screen">
 
     <header class="app-header">
@@ -114,8 +97,8 @@
         <span class="agent-name">OpenClaw</span>
       </div>
       <div class="header-right">
-        <button class="icon-btn" onclick="openSetup()" title="Configuración">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        <button class="icon-btn" onclick="openSetup()" title="Info">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
         </button>
         <button class="icon-btn" onclick="logout()" title="Salir">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
@@ -133,8 +116,8 @@
         <span>Skills</span>
       </button>
       <button class="tab" data-tab="info" onclick="switchTab('info', this)">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <span>Info</span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span>Estado</span>
       </button>
     </nav>
 
@@ -177,7 +160,7 @@
       </div>
     </div>
 
-    <!-- INFO -->
+    <!-- ESTADO -->
     <div id="tab-info" class="tab-content">
       <div class="tab-inner">
         <div class="section-header"><h2>Estado del agente</h2></div>
@@ -194,12 +177,15 @@
         <div class="section-header" style="margin-top:24px"><h2>Conexión</h2></div>
         <div class="info-card">
           <div class="info-row">
-            <span class="info-label">VPS</span>
-            <span class="info-value mono" id="info-url">—</span>
+            <span class="info-label">Proxy</span>
+            <span class="info-value mono">Cloudflare ✓</span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Datos sensibles</span>
+            <span class="info-value mono">Solo en servidor ✓</span>
           </div>
         </div>
-        <button class="btn-secondary" onclick="openSetup()" style="margin-top:16px">Cambiar configuración</button>
-        <button class="btn-danger" onclick="logout()" style="margin-top:12px">Cerrar sesión</button>
+        <button class="btn-danger" onclick="logout()" style="margin-top:24px">Cerrar sesión</button>
       </div>
     </div>
 

@@ -1,29 +1,14 @@
 // =====================
-// STATE
+// STATE — solo en memoria, nada sensible en localStorage
 // =====================
 const state = {
-  token: null,
-  url: null,
+  session: null,      // token de sesión temporal (memoria)
   isRecording: false,
   recognition: null
 };
 
-// =====================
-// STORAGE
-// =====================
-const Store = {
-  save(key, val) {
-    try { localStorage.setItem(key, btoa(encodeURIComponent(JSON.stringify(val)))); } catch {}
-  },
-  load(key) {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      return JSON.parse(decodeURIComponent(atob(raw)));
-    } catch { return null; }
-  },
-  remove(key) { localStorage.removeItem(key); }
-};
+// Base URL del proxy Cloudflare (relativo, siempre /api/...)
+const API = '/api';
 
 // =====================
 // INIT
@@ -36,25 +21,17 @@ function init() {
 // SCREENS
 // =====================
 function showScreen(name) {
-  document.querySelectorAll('.screen').forEach(s => {
-    s.classList.remove('active');
-  });
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   const el = document.getElementById('screen-' + name);
-  if (el) {
-    requestAnimationFrame(() => {
-      el.style.display = 'flex';
-      requestAnimationFrame(() => el.classList.add('active'));
-    });
-  }
+  if (el) requestAnimationFrame(() => el.classList.add('active'));
 }
 
 // =====================
-// LOGIN — Step 1: usuario y contraseña
+// LOGIN
 // =====================
 async function handleCredentials() {
   const user = document.getElementById('user-input').value.trim();
   const pass = document.getElementById('pass-input').value.trim();
-
   if (!user || !pass) { toast('Introduce usuario y contraseña'); return; }
 
   const btn = document.getElementById('login-btn');
@@ -62,135 +39,80 @@ async function handleCredentials() {
   btn.querySelector('span').textContent = 'Verificando...';
 
   try {
-    const res = await fetch('/auth', {
+    const res = await fetch(`${API}/auth`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user, pass })
     });
-
     const data = await res.json();
 
-    if (data.ok) {
-      // Credenciales OK — cargar config guardada
-      const saved = Store.load('oc_config');
-      if (saved && saved.token && saved.url) {
-        state.token = saved.token;
-        state.url = saved.url;
-        bootApp();
-      } else {
-        // Primera vez — ir a configuración
-        showScreen('setup');
-        document.getElementById('setup-back-btn').style.display = 'none';
-      }
+    if (data.ok && data.session) {
+      state.session = data.session;
+      bootApp();
     } else {
       toast('Usuario o contraseña incorrectos');
       document.getElementById('pass-input').value = '';
     }
   } catch {
-    toast('Error de conexión con el servidor');
+    toast('Error de conexión');
   } finally {
     btn.disabled = false;
     btn.querySelector('span').textContent = 'Entrar';
   }
 }
 
-// Enter en el campo de contraseña
+// Enter para login
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('pass-input').addEventListener('keydown', e => {
+  document.getElementById('pass-input')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') handleCredentials();
   });
-  document.getElementById('user-input').addEventListener('keydown', e => {
+  document.getElementById('user-input')?.addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('pass-input').focus();
   });
 });
 
 // =====================
-// SETUP — Configurar VPS
-// =====================
-function openSetup() {
-  const saved = Store.load('oc_config');
-  if (saved) {
-    // Rellenar con valores actuales
-    const parts = saved.url ? saved.url.replace('http://', '').split(':') : ['', '48001'];
-    document.getElementById('setup-ip').value = parts[0] || '';
-    document.getElementById('setup-port').value = parts[1] || '48001';
-    document.getElementById('setup-token').value = saved.token || '';
-  }
-  document.getElementById('setup-back-btn').style.display = 'flex';
-  document.getElementById('setup-status').style.display = 'none';
-  showScreen('setup');
-}
-
-function closeSetup() {
-  if (state.token && state.url) {
-    showScreen('app');
-  } else {
-    showScreen('login');
-  }
-}
-
-async function saveSetup() {
-  const ip = document.getElementById('setup-ip').value.trim();
-  const port = document.getElementById('setup-port').value.trim() || '48001';
-  const token = document.getElementById('setup-token').value.trim();
-
-  if (!ip) { toast('Introduce la IP de tu VPS'); return; }
-  if (!token) { toast('Introduce tu Gateway Token'); return; }
-
-  const url = `http://${ip}:${port}`;
-
-  // Mostrar estado
-  document.getElementById('setup-status').style.display = 'flex';
-
-  // Guardar
-  state.token = token;
-  state.url = url;
-  Store.save('oc_config', { token, url });
-
-  // Intentar conectar
-  try {
-    await checkAgentStatus();
-    toast('¡Conectado correctamente!');
-    setTimeout(() => bootApp(), 800);
-  } catch {
-    document.getElementById('setup-status').style.display = 'none';
-    toast('Guardado. No se pudo verificar la conexión ahora.');
-    setTimeout(() => bootApp(), 1200);
-  }
-}
-
-// =====================
-// BOOT APP
+// BOOT
 // =====================
 function bootApp() {
   showScreen('app');
-  document.getElementById('info-url').textContent = state.url || '—';
-  checkAgentStatus();
+  checkHealth();
   loadSkills();
 }
 
 // =====================
-// TABS
+// FETCH — siempre con session token, nunca expone el secret del VPS
 // =====================
-function switchTab(name, btn) {
-  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  btn.classList.add('active');
-  const tab = document.getElementById('tab-' + name);
-  if (tab) tab.classList.add('active');
+async function apiFetch(path, method = 'GET', body = null) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-Session-Token': state.session || ''
+  };
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(`${API}${path}`, opts);
+  if (res.status === 401) {
+    toast('Sesión expirada, vuelve a entrar');
+    logout();
+    throw new Error('Sesión expirada');
+  }
+  return res.json();
 }
 
 // =====================
-// AGENT STATUS
+// HEALTH
 // =====================
-async function checkAgentStatus() {
+async function checkHealth() {
   const dot = document.getElementById('agent-dot');
   const stat = document.getElementById('stat-status');
   try {
-    const res = await fetchAgent('/api/v1/health', 'GET');
-    if (res) {
+    const data = await apiFetch('/health');
+    if (data.ok) {
       dot.classList.add('online');
       if (stat) stat.textContent = 'Online';
+    } else {
+      dot.className = 'agent-dot';
+      if (stat) stat.textContent = 'Sin conexión';
     }
   } catch {
     dot.className = 'agent-dot';
@@ -199,31 +121,19 @@ async function checkAgentStatus() {
 }
 
 // =====================
-// FETCH
-// =====================
-async function fetchAgent(path, method = 'GET', body = null) {
-  const headers = {
-    'Authorization': `Bearer ${state.token}`,
-    'Content-Type': 'application/json'
-  };
-  const opts = { method, headers };
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(state.url + path, opts);
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  return res.json();
-}
-
-// =====================
 // SKILLS
 // =====================
 async function loadSkills() {
   const grid = document.getElementById('skills-list');
+  const countEl = document.getElementById('skills-count');
+  const statEl = document.getElementById('stat-skills');
+
   try {
-    const data = await fetchAgent('/api/v1/skills', 'GET');
-    const skills = data.skills || data || [];
-    const count = Array.isArray(skills) ? skills.length : 0;
-    document.getElementById('skills-count').textContent = count;
-    document.getElementById('stat-skills').textContent = count;
+    const data = await apiFetch('/skills');
+    const skills = data.skills || [];
+    const count = skills.length;
+    if (countEl) countEl.textContent = count;
+    if (statEl) statEl.textContent = count;
 
     if (count === 0) {
       grid.innerHTML = '<p style="color:var(--text3);font-size:13px;padding:20px 0;grid-column:1/-1">No hay skills instaladas aún</p>';
@@ -238,7 +148,7 @@ async function loadSkills() {
       </div>
     `).join('');
   } catch {
-    grid.innerHTML = '<p style="color:var(--text3);font-size:13px;padding:20px 0;grid-column:1/-1">Configura la conexión para ver las skills</p>';
+    grid.innerHTML = '<p style="color:var(--text3);font-size:13px;padding:20px 0;grid-column:1/-1">No se pudieron cargar las skills</p>';
   }
 }
 
@@ -271,15 +181,16 @@ function addThinking() {
   div.innerHTML = '<span></span><span></span><span></span>';
   msgs.appendChild(div);
   msgs.scrollTop = msgs.scrollHeight;
-  document.getElementById('agent-dot').classList.add('busy');
-  document.getElementById('agent-dot').classList.remove('online');
+  const dot = document.getElementById('agent-dot');
+  dot.classList.remove('online');
+  dot.classList.add('busy');
 }
 
 function removeThinking() {
-  const el = document.getElementById('thinking');
-  if (el) el.remove();
-  document.getElementById('agent-dot').classList.remove('busy');
-  document.getElementById('agent-dot').classList.add('online');
+  document.getElementById('thinking')?.remove();
+  const dot = document.getElementById('agent-dot');
+  dot.classList.remove('busy');
+  dot.classList.add('online');
 }
 
 async function sendMessage() {
@@ -287,25 +198,21 @@ async function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
 
-  if (!state.token || !state.url) {
-    toast('Configura la conexión primero');
-    openSetup();
-    return;
-  }
-
   input.value = '';
   input.style.height = 'auto';
   addMessage(text, 'user');
   addThinking();
 
   try {
-    const data = await fetchAgent('/api/v1/chat', 'POST', { message: text });
+    const data = await apiFetch('/chat', 'POST', { message: text });
     removeThinking();
-    const reply = data.response || data.message || data.content || data.reply || JSON.stringify(data);
+    const reply = data.response || data.message || data.content || 'Sin respuesta';
     addMessage(reply, 'agent');
-  } catch {
+  } catch (err) {
     removeThinking();
-    addMessage('No se pudo contactar con el agente. Verifica la configuración.', 'agent');
+    if (err.message !== 'Sesión expirada') {
+      addMessage('No se pudo contactar con el agente. Verifica que el backend está corriendo en tu VPS.', 'agent');
+    }
   }
 }
 
@@ -319,6 +226,28 @@ function handleKey(e) {
 function autoResize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+// =====================
+// TABS
+// =====================
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-' + name)?.classList.add('active');
+}
+
+// =====================
+// SETUP (solo info, ya no pide IP ni token)
+// =====================
+function openSetup() {
+  document.getElementById('setup-back-btn').style.display = 'flex';
+  showScreen('setup');
+}
+
+function closeSetup() {
+  showScreen('app');
 }
 
 // =====================
@@ -355,7 +284,7 @@ function startVoice() {
 function stopVoice() {
   if (state.recognition) { state.recognition.stop(); state.recognition = null; }
   state.isRecording = false;
-  document.getElementById('voice-btn').classList.remove('recording');
+  document.getElementById('voice-btn')?.classList.remove('recording');
   document.getElementById('voice-indicator').style.display = 'none';
 }
 
@@ -365,10 +294,7 @@ function cancelVoice() { stopVoice(); }
 // LOGOUT
 // =====================
 function logout() {
-  if (!confirm('¿Cerrar sesión?')) return;
-  Store.remove('oc_config');
-  state.token = null;
-  state.url = null;
+  state.session = null;
   document.getElementById('user-input').value = '';
   document.getElementById('pass-input').value = '';
   document.getElementById('messages').innerHTML = '<div class="msg-system"><span>Conectado a tu agente OpenClaw</span></div>';
@@ -380,7 +306,7 @@ function logout() {
 // =====================
 function togglePassword(id) {
   const inp = document.getElementById(id);
-  inp.type = inp.type === 'password' ? 'text' : 'password';
+  if (inp) inp.type = inp.type === 'password' ? 'text' : 'password';
 }
 
 function formatTime(d) {
@@ -389,7 +315,11 @@ function formatTime(d) {
 
 function escapeHtml(str) {
   if (!str) return '';
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
 }
 
 let toastTimer;
@@ -401,10 +331,8 @@ function toast(msg) {
   toastTimer = setTimeout(() => el.classList.remove('show'), 3000);
 }
 
-// Service Worker
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-// Start
 init();

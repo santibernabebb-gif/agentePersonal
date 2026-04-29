@@ -1,74 +1,148 @@
-# OpenClaw Agent PWA
+# OpenClaw Agent PWA — versión reparada
 
-App móvil instalable para controlar tu agente OpenClaw desde el móvil, con autenticación biométrica.
+Esta app es solo el **canal móvil**. El cerebro sigue estando en tu VPS: OpenClaw/ChatGPT autenticado/cola/scripts.
 
-## Características
+Arquitectura correcta:
 
-- 🔐 Login con huella digital / Face ID (WebAuthn)
-- 💬 Chat con tu agente con soporte de voz
-- ⚡ Skills instaladas visibles desde la app
-- 📊 Panel de estado del agente
-- 📱 Instalable como app nativa (PWA)
-- 🔒 Token cifrado en el dispositivo
-- ✈️ Funciona offline (caché)
-
-## Deploy en Cloudflare Pages
-
-1. Sube este proyecto a GitHub
-2. Ve a [Cloudflare Pages](https://pages.cloudflare.com)
-3. Conecta tu repositorio de GitHub
-4. Build settings:
-   - **Framework preset**: None
-   - **Build command**: (vacío)
-   - **Output directory**: `/` (raíz)
-5. Deploy
-
-## Configuración de iconos
-
-Añade tus propios iconos en la carpeta `/icons/`:
-- `icon-192.png` (192x192px)
-- `icon-512.png` (512x512px)
-
-Puedes generarlos en [https://realfavicongenerator.net](https://realfavicongenerator.net)
-
-## Uso
-
-1. Abre la app en tu móvil
-2. Introduce tu **Gateway Token** de OpenClaw
-3. Introduce la **URL de tu OpenClaw** (ej: `https://tu-vps.ionos.com:48001`)
-4. La primera vez guarda el token y activa biometría
-5. Las siguientes veces solo necesitas la huella
-
-## CORS en tu VPS
-
-Para que la app pueda conectar con tu OpenClaw, puede que necesites añadir el dominio de Cloudflare Pages a los orígenes permitidos en tu VPS.
-
-En tu OpenClaw, busca la configuración de CORS y añade:
-```
-https://tu-app.pages.dev
+```txt
+Móvil / PWA
+  ↓ /api
+Cloudflare Pages Function
+  ↓ OC_AGENT_SECRET
+VPS agent-api
+  ↓ local
+OpenClaw / ChatGPT auth / scripts / cola
 ```
 
-## Estructura
+## Qué se ha reparado
 
+- La app ya no pide IP ni token en el móvil.
+- El secreto real del VPS no se guarda en `localStorage`.
+- Cloudflare valida usuario/contraseña y firma una sesión temporal.
+- `functions/api/[[path]].js` solo permite rutas conocidas: `/auth`, `/health`, `/chat`, `/skills`, `/remind`.
+- `backend/install.sh` ya no tiene la ruta rota `/path/to/...`.
+- `agent-api.js` escucha por defecto en `127.0.0.1:3000`, más seguro para poner Nginx o Cloudflare Tunnel delante.
+- `agent-api.js` puede funcionar de dos formas:
+  1. WebSocket directo a OpenClaw: `ws://127.0.0.1:18789`.
+  2. Comando real mediante `AGENT_COMMAND`, recomendado si ya tienes un script/cola que usa el mismo flujo que Telegram.
+
+## Variables en Cloudflare Pages
+
+En tu proyecto de Cloudflare Pages añade:
+
+```txt
+OC_USER=tu_usuario_para_entrar_en_la_app
+OC_PASS=tu_contraseña_para_entrar_en_la_app
+OC_AGENT_SECRET=un_secret_largo_igual_que_en_el_vps
+OC_SESSION_SECRET=otro_secret_largo_opcional
+OC_API_URL=https://agent.santisystems.es
 ```
-openclaw-app/
-├── index.html      # App principal
-├── style.css       # Estilos
-├── app.js          # Lógica
-├── sw.js           # Service Worker (offline)
-├── manifest.json   # PWA manifest
-├── _redirects      # Cloudflare Pages config
-└── icons/          # Iconos de la app
-    ├── icon-192.png
-    └── icon-512.png
+
+Para una prueba rápida, `OC_API_URL` puede ser `http://TU_IP:3000`, pero no es lo ideal para producción.
+
+## Instalar backend en el VPS
+
+Sube la carpeta `backend/` al VPS, por ejemplo a `/root/openclaw-app/backend`.
+
+```bash
+cd /root/openclaw-app/backend
+chmod +x install.sh
+./install.sh
 ```
 
-## Instalar en móvil
+El instalador te pedirá un secret. Ese mismo valor debe ir en Cloudflare como `OC_AGENT_SECRET`.
 
-**Android (Chrome):**
-- Abre la web en Chrome
-- Menú → "Añadir a pantalla de inicio"
+## Probar backend localmente en el VPS
 
-**iOS (Safari):**
-- Abre la web en Safari
-- Compartir → "Añadir a pantalla de inicio"
+Después de instalar:
+
+```bash
+systemctl status openclaw-agent-api --no-pager -l
+```
+
+Prueba `/health`:
+
+```bash
+curl http://127.0.0.1:3000/health \
+-H "Authorization: Bearer TU_SECRET"
+```
+
+Prueba `/chat`:
+
+```bash
+curl -X POST http://127.0.0.1:3000/chat \
+-H "Authorization: Bearer TU_SECRET" \
+-H "Content-Type: application/json" \
+-d '{"message":"hola"}'
+```
+
+Si responde, el puente funciona.
+
+Si falla con WebSocket, no significa que la app esté mal: significa que OpenClaw no acepta ese formato de mensaje. En ese caso usa `AGENT_COMMAND` apuntando al mismo flujo que ya usa Telegram.
+
+## Conectar con el mismo flujo que Telegram
+
+Si tienes un script que recibe un mensaje y devuelve la respuesta del agente, edita:
+
+```bash
+nano /etc/systemd/system/openclaw-agent-api.service
+```
+
+Y añade/descomenta algo así:
+
+```txt
+Environment=AGENT_COMMAND=/root/agent-queue/send-message.sh
+```
+
+Luego:
+
+```bash
+systemctl daemon-reload
+systemctl restart openclaw-agent-api
+journalctl -u openclaw-agent-api -f
+```
+
+## Exponer el backend al Worker de Cloudflare
+
+Opción buena:
+
+```txt
+https://agent.santisystems.es -> 127.0.0.1:3000
+```
+
+Puedes hacerlo con Nginx + certificado o con Cloudflare Tunnel.
+
+No es recomendable dejar `3000` abierto a internet si puedes evitarlo.
+
+## Deploy de la PWA
+
+1. Sube el proyecto a GitHub.
+2. Cloudflare Pages → conectar repo.
+3. Build command vacío.
+4. Output directory `/`.
+5. Añade las variables anteriores.
+6. Deploy.
+
+## Archivos importantes
+
+```txt
+index.html                         interfaz
+app.js                             lógica cliente
+functions/api/[[path]].js          proxy seguro de Cloudflare
+backend/agent-api.js               puente en VPS
+backend/install.sh                 instalador systemd
+backend/openclaw-agent-api.service servicio systemd
+```
+
+## Punto crítico
+
+La app está lista como canal, pero el test decisivo es este en el VPS:
+
+```bash
+curl -X POST http://127.0.0.1:3000/chat \
+-H "Authorization: Bearer TU_SECRET" \
+-H "Content-Type: application/json" \
+-d '{"message":"hola"}'
+```
+
+Si ahí contesta tu ChatGPT/OpenClaw, después solo queda conectar Cloudflare.
