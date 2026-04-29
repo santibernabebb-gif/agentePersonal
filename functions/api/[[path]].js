@@ -1,104 +1,98 @@
 /**
- * functions/api/[[path]].js
- * Cloudflare Pages Function — proxy seguro entre PWA y VPS
+ * Cloudflare Pages Function: /api/*
  *
- * Variables de entorno en Cloudflare Pages:
- *   OC_USER          → usuario de la app
- *   OC_PASS          → contraseña de la app
- *   OC_AGENT_SECRET  → Bearer token para hablar con agent-api en el VPS
- *   OC_API_URL       → URL pública del agent-api (ej: https://tu-ip-o-dominio:3000)
+ * App -> /api/auth -> sesión firmada
+ * App -> /api/chat|health|skills|remind -> proxy seguro al VPS
+ *
+ * Variables en Cloudflare Pages:
+ *   OC_USER            usuario de la app
+ *   OC_PASS            contraseña de la app
+ *   OC_AGENT_SECRET    secret Bearer para hablar con agent-api del VPS
+ *   OC_API_URL         URL del backend VPS. Ej: https://agent.santisystems.es o http://TU_IP:3000 para prueba
+ *   OC_SESSION_SECRET  opcional. Si no existe, usa OC_AGENT_SECRET para firmar sesiones
  */
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Content-Type': 'application/json'
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Session-Token',
+  'Content-Type': 'application/json; charset=utf-8',
+  'Cache-Control': 'no-store'
 };
+
+const ALLOWED_PROXY = new Set(['/health', '/chat', '/skills', '/remind']);
 
 export async function onRequest(context) {
   const { request, env } = context;
 
-  // CORS preflight
   if (request.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: CORS });
   }
 
   const url = new URL(request.url);
-  const path = url.pathname.replace('/api', '') || '/';
+  const path = url.pathname.replace(/^\/api/, '') || '/';
 
-  // =====================
-  // RUTA: /api/auth — Login usuario/contraseña
-  // =====================
   if (path === '/auth' && request.method === 'POST') {
     return handleAuth(request, env);
   }
 
-  // =====================
-  // RUTAS PROTEGIDAS — requieren session token
-  // =====================
+  if (!ALLOWED_PROXY.has(path)) {
+    return json({ ok: false, error: 'Ruta no permitida' }, 404);
+  }
+
   const sessionToken = request.headers.get('X-Session-Token') || '';
-  if (!isValidSession(sessionToken, env)) {
+  const valid = await isValidSession(sessionToken, env);
+  if (!valid) {
     return json({ ok: false, error: 'Sesión no válida' }, 401);
   }
 
-  // Proxy al VPS
   return proxyToVPS(path, request, env);
 }
 
-// =====================
-// AUTH
-// =====================
 async function handleAuth(request, env) {
   try {
     const { user, pass } = await request.json();
 
-    if (!env.OC_USER || !env.OC_PASS) {
-      return json({ ok: false, error: 'Variables de entorno no configuradas' }, 500);
+    if (!env.OC_USER || !env.OC_PASS || !env.OC_AGENT_SECRET) {
+      return json({ ok: false, error: 'Faltan variables OC_USER, OC_PASS u OC_AGENT_SECRET en Cloudflare.' }, 500);
     }
 
-    if (user === env.OC_USER && pass === env.OC_PASS) {
-      // Generar session token simple
-      const session = btoa(`${user}:${Date.now()}:${Math.random().toString(36)}`);
-      return json({ ok: true, session });
+    const okUser = timingSafeEqual(String(user || ''), String(env.OC_USER));
+    const okPass = timingSafeEqual(String(pass || ''), String(env.OC_PASS));
+
+    if (!okUser || !okPass) {
+      await sleep(900);
+      return json({ ok: false, error: 'Credenciales incorrectas' }, 401);
     }
 
-    // Delay anti fuerza bruta
-    await new Promise(r => setTimeout(r, 1000));
-    return json({ ok: false, error: 'Credenciales incorrectas' }, 401);
-
-  } catch {
-    return json({ ok: false, error: 'Error en autenticación' }, 500);
+    const exp = Date.now() + 24 * 60 * 60 * 1000;
+    const nonce = cryptoRandomString(16);
+    const payload = `${env.OC_USER}.${exp}.${nonce}`;
+    const sig = await sign(payload, sessionSecret(env));
+    return json({ ok: true, session: `${payload}.${sig}`, expiresAt: exp });
+  } catch (err) {
+    return json({ ok: false, error: 'Error en autenticación', detail: err.message }, 500);
   }
 }
 
-// =====================
-// SESSION CHECK (simple, stateless)
-// =====================
-function isValidSession(token, env) {
-  if (!token) return false;
-  try {
-    const decoded = atob(token);
-    const parts = decoded.split(':');
-    // Verificar que el usuario es correcto y el token no es muy viejo (24h)
-    const user = parts[0];
-    const ts = parseInt(parts[1]);
-    const age = Date.now() - ts;
-    return user === env.OC_USER && age < 86400000; // 24 horas
-  } catch {
-    return false;
-  }
+async function isValidSession(token, env) {
+  if (!token || !env.OC_USER) return false;
+  const parts = token.split('.');
+  if (parts.length !== 4) return false;
+  const [user, expRaw, nonce, sig] = parts;
+  const exp = Number(expRaw);
+  if (user !== env.OC_USER || !Number.isFinite(exp) || Date.now() > exp) return false;
+  const payload = `${user}.${expRaw}.${nonce}`;
+  const expected = await sign(payload, sessionSecret(env));
+  return timingSafeEqual(sig, expected);
 }
 
-// =====================
-// PROXY AL VPS
-// =====================
 async function proxyToVPS(path, request, env) {
   if (!env.OC_API_URL || !env.OC_AGENT_SECRET) {
     return json({ ok: false, error: 'Backend no configurado. Añade OC_API_URL y OC_AGENT_SECRET en Cloudflare.' }, 500);
   }
 
-  const targetUrl = `${env.OC_API_URL.replace(/\/$/, '')}${path}`;
+  const targetUrl = `${String(env.OC_API_URL).replace(/\/$/, '')}${path}`;
 
   try {
     const init = {
@@ -109,21 +103,56 @@ async function proxyToVPS(path, request, env) {
       }
     };
 
-    if (request.method === 'POST') {
+    if (request.method !== 'GET' && request.method !== 'HEAD') {
       init.body = await request.text();
     }
 
     const res = await fetch(targetUrl, init);
-    const data = await res.text();
-
-    return new Response(data, {
+    const text = await res.text();
+    return new Response(text || '{}', {
       status: res.status,
-      headers: { ...CORS, 'Content-Type': 'application/json' }
+      headers: CORS
     });
-
   } catch (err) {
     return json({ ok: false, error: 'No se pudo contactar con el VPS', detail: err.message }, 502);
   }
+}
+
+function sessionSecret(env) {
+  return env.OC_SESSION_SECRET || env.OC_AGENT_SECRET || 'missing-secret';
+}
+
+async function sign(payload, secret) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(payload));
+  return base64url(sig);
+}
+
+function base64url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let s = '';
+  for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function cryptoRandomString(len) {
+  const bytes = new Uint8Array(len);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function timingSafeEqual(a, b) {
+  a = String(a || '');
+  b = String(b || '');
+  if (a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i++) out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return out === 0;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function json(data, status = 200) {
