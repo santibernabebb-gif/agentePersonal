@@ -1,0 +1,19 @@
+[Unit]
+Description=OpenClaw Agent API
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/openclaw-agent-api
+ExecStart=/usr/bin/node agent-api.js
+Restart=always
+RestartSec=5
+
+# Variables de entorno — CAMBIA ESTOS VALORES
+Environment=PORT=3000
+Environment=AGENT_APP_SECRET=PON_AQUI_TU_SECRET_MUY_LARGO
+Environment=OPENCLAW_WS_URL=ws://127.0.0.1:18789
+
+[Install]
+WantedBy=multi-user.target
