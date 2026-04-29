@@ -1,47 +1,53 @@
 #!/bin/bash
-# install.sh — Ejecutar en el VPS como root
-# Instala y arranca el backend agent-api
+# install.sh — Ejecutar en el VPS como root desde la carpeta backend/
+# Instala y arranca el backend agent-api.
 
-set -e
+set -euo pipefail
+
+cd "$(dirname "$0")"
 
 echo "=== Instalando OpenClaw Agent API ==="
 
-# 1. Comprobar Node.js
-if ! command -v node &> /dev/null; then
-  echo "Instalando Node.js..."
+if ! command -v node >/dev/null 2>&1; then
+  echo "Instalando Node.js 20..."
   curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
   apt-get install -y nodejs
 fi
 
 echo "Node.js: $(node --version)"
 
-# 2. Crear directorio
 mkdir -p /root/openclaw-agent-api
-cp agent-api.js /root/openclaw-agent-api/
-cp package.json /root/openclaw-agent-api/
+cp agent-api.js package.json /root/openclaw-agent-api/
 
-# 3. Instalar dependencias
 cd /root/openclaw-agent-api
-npm install --production
+npm install --omit=dev
 
-# 4. Pedir el secret
 echo ""
-echo "Introduce un secret largo y aleatorio para AGENT_APP_SECRET:"
-echo "(Este mismo valor lo pondrás en Cloudflare Pages como variable OC_AGENT_SECRET)"
-read -s -p "Secret: " SECRET
+echo "Introduce un secret largo y aleatorio para AGENT_APP_SECRET."
+echo "Este mismo valor irá en Cloudflare Pages como OC_AGENT_SECRET."
+read -r -s -p "Secret: " SECRET
 echo ""
 
-# 5. Instalar servicio systemd
-sed "s/PON_AQUI_TU_SECRET_MUY_LARGO/$SECRET/" /path/to/openclaw-agent-api.service > /etc/systemd/system/openclaw-agent-api.service
+if [ -z "$SECRET" ]; then
+  echo "ERROR: secret vacío."
+  exit 1
+fi
 
-# 6. Arrancar
+TMP_SERVICE="/tmp/openclaw-agent-api.service"
+sed "s|PON_AQUI_TU_SECRET_MUY_LARGO|$SECRET|g" "$(dirname "$0")/openclaw-agent-api.service" > "$TMP_SERVICE"
+cp "$TMP_SERVICE" /etc/systemd/system/openclaw-agent-api.service
+chmod 644 /etc/systemd/system/openclaw-agent-api.service
+
 systemctl daemon-reload
 systemctl enable openclaw-agent-api
-systemctl start openclaw-agent-api
+systemctl restart openclaw-agent-api
 
 echo ""
-echo "=== Listo ==="
-systemctl status openclaw-agent-api --no-pager
+echo "=== Servicio instalado ==="
+systemctl status openclaw-agent-api --no-pager -l || true
+
 echo ""
-echo "El API está corriendo en http://127.0.0.1:3000"
-echo "Ahora configura el túnel Cloudflare o Nginx para exponerlo."
+echo "Prueba local:"
+echo "curl -X POST http://127.0.0.1:3000/chat -H \"Authorization: Bearer $SECRET\" -H \"Content-Type: application/json\" -d '{\"message\":\"hola\"}'"
+echo ""
+echo "Si responde, configura Cloudflare/Nginx/Tunnel para llegar a este backend."

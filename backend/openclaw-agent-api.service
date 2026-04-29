@@ -1,6 +1,7 @@
 [Unit]
-Description=OpenClaw Agent API
-After=network.target
+Description=OpenClaw Agent API bridge
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -10,10 +11,14 @@ ExecStart=/usr/bin/node agent-api.js
 Restart=always
 RestartSec=5
 
-# Variables de entorno — CAMBIA ESTOS VALORES
 Environment=PORT=3000
+Environment=LISTEN_HOST=127.0.0.1
 Environment=AGENT_APP_SECRET=PON_AQUI_TU_SECRET_MUY_LARGO
 Environment=OPENCLAW_WS_URL=ws://127.0.0.1:18789
+
+# Si WebSocket no funciona con tu OpenClaw, descomenta y apunta al script real que ya usa Telegram/cola.
+# Environment=AGENT_COMMAND=/root/agent-queue/send-message.sh
+# Environment=TG_REMIND_CMD=/usr/local/bin/tg-remind
 
 [Install]
 WantedBy=multi-user.target
