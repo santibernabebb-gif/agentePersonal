@@ -100,7 +100,7 @@
         <span class="agent-name">OpenClaw</span>
       </div>
       <div class="header-right">
-        <button class="icon-btn install-btn" id="install-btn" onclick="installPWA()" title="Instalar app">
+        <button class="icon-btn install-btn" id="install-btn" onclick="installPWA()" title="Instalar app" style="display:none">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/></svg>
         </button>
         <button class="icon-btn" onclick="openSetup()" title="Info">
@@ -198,34 +198,6 @@
   </div>
 
   <div id="toast" class="toast"></div>
-
-  <!-- PWA INSTALL BANNER -->
-  <div class="pwa-banner" id="pwa-banner">
-    <div class="pwa-banner-icon">
-      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
-        <path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M5 21h14"/>
-      </svg>
-    </div>
-    <div class="pwa-banner-text">
-      <div class="pwa-banner-title" id="pwa-banner-title">Instalar OpenClaw</div>
-      <div class="pwa-banner-sub" id="pwa-banner-sub">Accede desde tu pantalla de inicio</div>
-    </div>
-    <div class="pwa-banner-actions">
-      <button class="pwa-btn-dismiss" onclick="dismissPWABanner()">No</button>
-      <button class="pwa-btn-install" id="pwa-action-btn" onclick="handlePWAAction()">Instalar</button>
-    </div>
-  </div>
-
-  <!-- PWA INSTRUCTIONS MODAL (iOS / Desktop) -->
-  <div class="pwa-modal-backdrop" id="pwa-modal" onclick="closePWAModal(event)">
-    <div class="pwa-modal">
-      <div class="pwa-modal-title">Cómo instalar</div>
-      <div class="pwa-modal-sub" id="pwa-modal-sub">Sigue estos pasos en tu navegador</div>
-      <div id="pwa-steps"></div>
-      <button class="pwa-modal-close" onclick="closePWAModal()">Entendido</button>
-    </div>
-  </div>
-
   <script src="app.js"></script>
 </body>
 </html>

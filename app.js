@@ -20,159 +20,32 @@ function init() {
 
 
 // =====================
-// PWA INSTALL — multi-plataforma
+// PWA INSTALL
 // =====================
-
-const PWA = {
-  platform: detectPlatform(),
-  dismissed: sessionStorage.getItem('pwa_dismissed') === '1',
-  installed: window.matchMedia('(display-mode: standalone)').matches
-    || window.navigator.standalone === true,
-};
-
-function detectPlatform() {
-  const ua = navigator.userAgent;
-  const isIOS = /iphone|ipad|ipod/i.test(ua);
-  const isMac = /macintosh/i.test(ua) && navigator.maxTouchPoints > 1;
-  const isAndroid = /android/i.test(ua);
-  const isSafari = /safari/i.test(ua) && !/chrome/i.test(ua);
-  const isChrome = /chrome|chromium|crios/i.test(ua) && !/edg/i.test(ua);
-  const isEdge = /edg\//i.test(ua);
-  const isFirefox = /firefox/i.test(ua);
-
-  if ((isIOS || isMac) && isSafari) return 'ios';
-  if (isAndroid && isChrome) return 'android-chrome';
-  if (isChrome) return 'desktop-chrome';
-  if (isEdge) return 'desktop-edge';
-  if (isFirefox) return 'desktop-firefox';
-  return 'generic';
-}
-
-// Captura evento nativo (Chrome/Edge/Android)
 window.addEventListener('beforeinstallprompt', (event) => {
   event.preventDefault();
   state.installPrompt = event;
-  // Mostrar también el header btn si está en la app
   const btn = document.getElementById('install-btn');
   if (btn) btn.style.display = 'flex';
-  // Mostrar banner si no fue descartado
-  if (!PWA.dismissed && !PWA.installed) showPWABanner();
 });
 
 window.addEventListener('appinstalled', () => {
   state.installPrompt = null;
-  PWA.installed = true;
-  hidePWABanner();
   const btn = document.getElementById('install-btn');
   if (btn) btn.style.display = 'none';
-  toast('✓ App instalada correctamente');
+  toast('App instalada');
 });
 
-// Al cargar: mostrar banner para iOS/Firefox (no tienen beforeinstallprompt)
-window.addEventListener('load', () => {
-  if (PWA.installed || PWA.dismissed) return;
-  if (PWA.platform === 'ios' || PWA.platform === 'desktop-firefox') {
-    // Pequeño delay para no interrumpir el inicio
-    setTimeout(showPWABanner, 1500);
-  }
-});
-
-function showPWABanner() {
-  const banner = document.getElementById('pwa-banner');
-  if (!banner) return;
-  const titleEl = document.getElementById('pwa-banner-title');
-  const subEl = document.getElementById('pwa-banner-sub');
-  const actionBtn = document.getElementById('pwa-action-btn');
-
-  if (PWA.platform === 'ios') {
-    titleEl.textContent = 'Instalar en iPhone / iPad';
-    subEl.textContent = 'Añade la app a tu pantalla de inicio';
-    actionBtn.textContent = 'Cómo hacerlo';
-  } else if (PWA.platform === 'desktop-firefox') {
-    titleEl.textContent = 'Instalar OpenClaw';
-    subEl.textContent = 'Disponible como app de escritorio';
-    actionBtn.textContent = 'Ver instrucciones';
-  } else {
-    titleEl.textContent = 'Instalar OpenClaw';
-    subEl.textContent = 'Accede más rápido desde tu dispositivo';
-    actionBtn.textContent = 'Instalar';
-  }
-
-  requestAnimationFrame(() => banner.classList.add('visible'));
-}
-
-function hidePWABanner() {
-  const banner = document.getElementById('pwa-banner');
-  if (banner) banner.classList.remove('visible');
-}
-
-function dismissPWABanner() {
-  sessionStorage.setItem('pwa_dismissed', '1');
-  PWA.dismissed = true;
-  hidePWABanner();
-}
-
-async function handlePWAAction() {
-  // Chrome/Edge/Android: prompt nativo
-  if (state.installPrompt) {
-    state.installPrompt.prompt();
-    const { outcome } = await state.installPrompt.userChoice;
-    state.installPrompt = null;
-    if (outcome === 'accepted') hidePWABanner();
+async function installPWA() {
+  if (!state.installPrompt) {
+    toast('Abre el menú del navegador y pulsa Instalar app');
     return;
   }
-  // iOS o Firefox: mostrar instrucciones
-  showPWAModal();
-}
-
-// Compatibilidad con el botón del header original
-async function installPWA() {
-  await handlePWAAction();
-}
-
-function showPWAModal() {
-  const stepsEl = document.getElementById('pwa-steps');
-  const subEl = document.getElementById('pwa-modal-sub');
-  const modal = document.getElementById('pwa-modal');
-
-  let steps = [];
-
-  if (PWA.platform === 'ios') {
-    subEl.textContent = 'En Safari para iPhone / iPad:';
-    steps = [
-      { icon: '📤', text: 'Pulsa el botón <strong>Compartir</strong> (el icono con flecha hacia arriba) en la barra de Safari' },
-      { icon: '➕', text: 'Desplázate y toca <strong>"Añadir a pantalla de inicio"</strong>' },
-      { icon: '✅', text: 'Pulsa <strong>Añadir</strong> en la esquina superior derecha' },
-    ];
-  } else if (PWA.platform === 'desktop-firefox') {
-    subEl.textContent = 'En Firefox para escritorio:';
-    steps = [
-      { icon: '🔧', text: 'Haz clic en el icono de <strong>instalar</strong> (⊕) que aparece en la barra de direcciones' },
-      { icon: '✅', text: 'Confirma pulsando <strong>Instalar</strong> en el diálogo' },
-      { icon: '🚀', text: 'La app se abrirá en una ventana independiente' },
-    ];
-  } else {
-    subEl.textContent = 'En tu navegador:';
-    steps = [
-      { icon: '⋮', text: 'Abre el <strong>menú del navegador</strong> (los tres puntos arriba a la derecha)' },
-      { icon: '📲', text: 'Busca la opción <strong>"Instalar app"</strong> o <strong>"Añadir a pantalla de inicio"</strong>' },
-      { icon: '✅', text: 'Confirma la instalación' },
-    ];
-  }
-
-  stepsEl.innerHTML = steps.map((s, i) => `
-    <div class="pwa-step">
-      <div class="pwa-step-num">${i + 1}</div>
-      <div class="pwa-step-text">${s.text}</div>
-    </div>
-  `).join('');
-
-  modal.classList.add('open');
-}
-
-function closePWAModal(event) {
-  if (event && event.target !== event.currentTarget) return;
-  document.getElementById('pwa-modal').classList.remove('open');
+  state.installPrompt.prompt();
+  await state.installPrompt.userChoice;
+  state.installPrompt = null;
+  const btn = document.getElementById('install-btn');
+  if (btn) btn.style.display = 'none';
 }
 
 // =====================
