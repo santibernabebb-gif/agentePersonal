@@ -146,3 +146,25 @@ curl -X POST http://127.0.0.1:3000/chat \
 ```
 
 Si ahí contesta tu ChatGPT/OpenClaw, después solo queda conectar Cloudflare.
+
+## PWA instalable
+
+Este ZIP ya incluye lo necesario para instalar la web como app:
+
+- `manifest.json`
+- `sw.js`
+- iconos en `/icons/`
+- registro del service worker desde `app.js`
+- botón de instalación en la cabecera cuando el navegador lo permita
+
+Para aplicar los cambios en Cloudflare Pages:
+
+1. Sube este proyecto o haz deploy desde GitHub.
+2. Mantén las variables de Production:
+   - `OC_API_URL=http://agent.santisystems.es:3000`
+   - `OC_AGENT_SECRET=...`
+   - `OC_USER=...`
+   - `OC_PASS=...`
+3. Haz Redeploy.
+4. En Android Chrome abre `https://agentepersonal.pages.dev/` y pulsa **Instalar app** o menú ⋮ → **Instalar app**.
+

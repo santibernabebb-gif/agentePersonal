@@ -4,7 +4,8 @@
 const state = {
   session: null,      // token de sesión temporal (memoria)
   isRecording: false,
-  recognition: null
+  recognition: null,
+  installPrompt: null
 };
 
 // Base URL del proxy Cloudflare (relativo, siempre /api/...)
@@ -15,6 +16,36 @@ const API = '/api';
 // =====================
 function init() {
   showScreen('login');
+}
+
+
+// =====================
+// PWA INSTALL
+// =====================
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  state.installPrompt = event;
+  const btn = document.getElementById('install-btn');
+  if (btn) btn.style.display = 'flex';
+});
+
+window.addEventListener('appinstalled', () => {
+  state.installPrompt = null;
+  const btn = document.getElementById('install-btn');
+  if (btn) btn.style.display = 'none';
+  toast('App instalada');
+});
+
+async function installPWA() {
+  if (!state.installPrompt) {
+    toast('Abre el menú del navegador y pulsa Instalar app');
+    return;
+  }
+  state.installPrompt.prompt();
+  await state.installPrompt.userChoice;
+  state.installPrompt = null;
+  const btn = document.getElementById('install-btn');
+  if (btn) btn.style.display = 'none';
 }
 
 // =====================
@@ -332,7 +363,7 @@ function toast(msg) {
 }
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
 init();
