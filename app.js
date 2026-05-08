@@ -5,7 +5,8 @@ const state = {
   session: null,      // token de sesión temporal (memoria)
   isRecording: false,
   recognition: null,
-  installPrompt: null
+  installPrompt: null,
+  activeSkill: 'chat' // chat | manuales
 };
 
 // Base URL del proxy Cloudflare (relativo, siempre /api/...)
@@ -172,7 +173,7 @@ async function loadSkills() {
     }
 
     grid.innerHTML = skills.map(s => `
-      <div class="skill-card" onclick="useSkill('${escapeHtml(s.name || s.id || '')}')">
+      <div class="skill-card" onclick="useSkill('${escapeHtml(s.id || 'chat')}', '${escapeHtml(s.name || s.id || '')}')">
         <div class="skill-icon">${s.icon || '⚡'}</div>
         <div class="skill-name">${escapeHtml(s.name || s.id || 'Sin nombre')}</div>
         <div class="skill-desc">${escapeHtml(s.description || '')}</div>
@@ -183,10 +184,22 @@ async function loadSkills() {
   }
 }
 
-function useSkill(name) {
+function useSkill(id, name) {
+  state.activeSkill = id === 'manuales' ? 'manuales' : 'chat';
   switchTab('chat', document.querySelector('.tab[data-tab="chat"]'));
-  document.getElementById('msg-input').value = `Usa la skill: ${name}`;
-  document.getElementById('msg-input').focus();
+
+  const input = document.getElementById('msg-input');
+  input.value = '';
+  input.placeholder = state.activeSkill === 'manuales'
+    ? 'Pregunta algo de tus manuales...'
+    : 'Escribe un mensaje...';
+  input.focus();
+
+  if (state.activeSkill === 'manuales') {
+    addMessage(`Modo manuales activado. Pregúntame algo y buscaré en /root/manuales.`, 'agent');
+  } else {
+    addMessage(`Modo chat activado.`, 'agent');
+  }
 }
 
 // =====================
@@ -235,7 +248,9 @@ async function sendMessage() {
   addThinking();
 
   try {
-    const data = await apiFetch('/chat', 'POST', { message: text });
+    const path = state.activeSkill === 'manuales' ? '/manuales' : '/chat';
+    const payload = state.activeSkill === 'manuales' ? { query: text } : { message: text };
+    const data = await apiFetch(path, 'POST', payload);
     removeThinking();
     const reply = data.response || data.message || data.content || 'Sin respuesta';
     addMessage(reply, 'agent');
