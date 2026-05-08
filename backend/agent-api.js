@@ -1,66 +1,39 @@
 /**
  * agent-api.js
- * Puente privado entre la PWA y el agente que ya vive en el VPS.
- *
- * Flujo previsto:
- *   App -> Cloudflare Pages Function -> agent-api en VPS -> OpenClaw/ChatGPT auth/skills
- *
- * Importante:
- * - Este proceso NO debe guardar credenciales de ChatGPT.
- * - El "cerebro" sigue siendo tu OpenClaw/ChatGPT autenticado en el VPS.
- * - Por defecto escucha solo en 127.0.0.1 para poner Nginx/Cloudflare Tunnel delante.
- *
- * Variables:
- *   AGENT_APP_SECRET   obligatorio. Debe coincidir con OC_AGENT_SECRET en Cloudflare.
- *   PORT               opcional. Default 3000.
- *   LISTEN_HOST        opcional. Default 127.0.0.1. Usa 0.0.0.0 solo para pruebas controladas.
- *   OPENCLAW_WS_URL    opcional. Default ws://127.0.0.1:18789.
- *   AGENT_COMMAND      opcional. Comando real que recibe el mensaje por stdin y devuelve respuesta por stdout.
- *                      Ejemplo: AGENT_COMMAND="/root/agent-queue/send-message.sh"
- *   TG_REMIND_CMD      opcional. Comando para recordatorios simples. Ejemplo: /usr/local/bin/tg-remind
+ * Backend puente entre la PWA y el agente real de OpenClaw del VPS.
  */
 
 const express = require('express');
 const cors = require('cors');
-const WebSocket = require('ws');
-const { spawn } = require('child_process');
-const crypto = require('crypto');
+const { execFile } = require('child_process');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const LISTEN_HOST = process.env.LISTEN_HOST || '127.0.0.1';
 const AGENT_SECRET = process.env.AGENT_APP_SECRET || '';
-const OPENCLAW_WS = process.env.OPENCLAW_WS_URL || 'ws://127.0.0.1:18789';
-const AGENT_COMMAND = process.env.AGENT_COMMAND || '';
-const TG_REMIND_CMD = process.env.TG_REMIND_CMD || '';
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '';
+const OPENCLAW_AGENT = process.env.OPENCLAW_AGENT || 'main';
+const OPENCLAW_BIN = process.env.OPENCLAW_BIN || '/usr/bin/openclaw';
+const COMMAND_TIMEOUT_MS = Number(process.env.COMMAND_TIMEOUT_MS || 120000);
 
-if (!AGENT_SECRET || AGENT_SECRET === 'PON_AQUI_TU_SECRET_MUY_LARGO') {
-  console.error('ERROR: define AGENT_APP_SECRET con un valor largo y secreto.');
+if (!AGENT_SECRET) {
+  console.error('ERROR: AGENT_APP_SECRET no está definido. Saliendo.');
   process.exit(1);
 }
 
-app.disable('x-powered-by');
-app.use(express.json({ limit: '256kb' }));
+app.use(express.json({ limit: '2mb' }));
 app.use(cors({
-  origin: ALLOWED_ORIGIN || false,
+  origin: '*',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-function timingSafeEqual(a, b) {
-  const ab = Buffer.from(String(a));
-  const bb = Buffer.from(String(b));
-  if (ab.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ab, bb);
-}
-
 function auth(req, res, next) {
   const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-  if (!token || !timingSafeEqual(token, AGENT_SECRET)) {
+  const token = header.replace(/^Bearer\s+/i, '').trim();
+
+  if (!token || token !== AGENT_SECRET) {
     return res.status(401).json({ ok: false, error: 'No autorizado' });
   }
+
   next();
 }
 
@@ -69,196 +42,209 @@ app.use((req, _res, next) => {
   next();
 });
 
-app.get('/health', auth, async (_req, res) => {
-  const ws = await probeOpenClaw(1200);
+app.get('/health', auth, (_req, res) => {
   res.json({
     ok: true,
     status: 'online',
-    timestamp: new Date().toISOString(),
-    listen_host: LISTEN_HOST,
-    port: PORT,
-    mode: AGENT_COMMAND ? 'command' : 'websocket',
-    openclaw: ws
+    bridge: 'openclaw-cli',
+    openclaw_agent: OPENCLAW_AGENT,
+    timestamp: new Date().toISOString()
   });
 });
 
 app.post('/chat', auth, async (req, res) => {
   const message = String(req.body?.message || '').trim();
-  if (!message) return res.status(400).json({ ok: false, error: 'Mensaje vacío' });
-  if (message.length > 12000) return res.status(413).json({ ok: false, error: 'Mensaje demasiado largo' });
+
+  if (!message) {
+    return res.status(400).json({ ok: false, error: 'Mensaje vacío' });
+  }
 
   try {
-    const response = await sendToAgent(message);
-    res.json({ ok: true, response });
+    const response = await sendToOpenClaw(message);
+    return res.json({ ok: true, response });
   } catch (err) {
-    console.error('Error /chat:', err);
-    res.status(502).json({
+    console.error('Error llamando a OpenClaw CLI:', err);
+    return res.status(502).json({
       ok: false,
       error: 'No se pudo contactar con el agente real del VPS',
-      detail: err.message,
-      hint: 'Si falla WebSocket, configura AGENT_COMMAND apuntando al mismo flujo que usa Telegram/OpenClaw.'
+      detail: err.message
+    });
+  }
+});
+
+app.post('/manuales', auth, async (req, res) => {
+  const query = String(req.body?.query || req.body?.message || '').trim();
+
+  if (!query) {
+    return res.status(400).json({ ok: false, error: 'Consulta vacía' });
+  }
+
+  try {
+    const raw = await buscarManuales(query);
+
+    if (!raw.trim()) {
+      return res.json({
+        ok: true,
+        response: `No he encontrado nada claro en los manuales para: "${query}".`
+      });
+    }
+
+    const prompt = `
+Eres un asistente técnico informático para soporte a usuarios funcionarios.
+
+Responde SOLO usando los fragmentos de manuales que aparecen abajo.
+
+Pregunta:
+${query}
+
+Fragmentos encontrados:
+${raw}
+
+Instrucciones:
+- Da una solución práctica paso a paso.
+- Di claramente en qué archivo/manual aparece.
+- Si hay varios manuales, menciona los más relevantes.
+- Si la información no es suficiente, dilo.
+- No inventes datos fuera de los fragmentos.
+`;
+
+    const response = await sendToOpenClaw(prompt);
+    return res.json({ ok: true, response, raw });
+  } catch (err) {
+    console.error('Error consultando manuales:', err);
+    return res.status(500).json({
+      ok: false,
+      error: 'Error consultando manuales',
+      detail: err.message
     });
   }
 });
 
 app.get('/skills', auth, async (_req, res) => {
-  // No inventamos skills. Mientras no haya endpoint real, devolvemos lista vacía limpia.
-  res.json({
+  return res.json({
     ok: true,
-    skills: [],
-    note: 'Skills no conectadas todavía. El chat sí debe ir por el agente real.'
+    skills: [
+      {
+        id: 'chat',
+        name: 'ChatGPT / OpenClaw',
+        icon: '🧠',
+        description: 'Hablar con el agente principal del VPS'
+      },
+      {
+        id: 'manuales',
+        name: 'Manuales internos',
+        icon: '📚',
+        description: 'Buscar soluciones en los manuales subidos a la VPS'
+      }
+    ]
   });
 });
 
 app.post('/remind', auth, async (req, res) => {
-  const text = String(req.body?.text || req.body?.message || '').trim();
+  const text = String(req.body?.text || '').trim();
   const when = String(req.body?.when || '').trim();
-  if (!text) return res.status(400).json({ ok: false, error: 'Falta el texto del recordatorio' });
+
+  if (!text) {
+    return res.status(400).json({ ok: false, error: 'Falta el texto del recordatorio' });
+  }
+
+  const message = when
+    ? `Recuérdame ${when}: ${text}`
+    : `Crea un recordatorio para esto: ${text}`;
 
   try {
-    // Si tienes tg-remind y mandas segundos exactos, se puede usar directo.
-    // Para lenguaje natural, se lo pasamos al cerebro para que decida.
-    if (TG_REMIND_CMD && /^\d+$/.test(when)) {
-      const out = await runCommand(TG_REMIND_CMD, [`${when}`, text], '', 15000);
-      return res.json({ ok: true, response: out || 'Recordatorio enviado al comando.' });
-    }
-
-    const msg = when ? `Recuérdame ${when}: ${text}` : `Recuérdame esto: ${text}`;
-    const response = await sendToAgent(msg);
-    res.json({ ok: true, response });
+    const response = await sendToOpenClaw(message);
+    return res.json({ ok: true, response });
   } catch (err) {
-    res.status(502).json({ ok: false, error: 'Error creando recordatorio', detail: err.message });
+    console.error('Error creando recordatorio con OpenClaw CLI:', err);
+    return res.status(502).json({ ok: false, error: 'Error al crear recordatorio', detail: err.message });
   }
 });
 
-async function sendToAgent(message) {
-  // Modo recomendado si ya tienes un script/cola que usa Telegram/OpenClaw/ChatGPT auth.
-  if (AGENT_COMMAND) {
-    return runCommand(AGENT_COMMAND, [], message, 120000);
-  }
-  // Modo provisional: intenta hablar con el gateway local de OpenClaw.
-  return sendToOpenClawWS(message);
-}
-
-function runCommand(commandLine, args = [], input = '', timeoutMs = 120000) {
+function buscarManuales(query) {
   return new Promise((resolve, reject) => {
-    const parts = splitCommand(commandLine);
-    const cmd = parts.shift();
-    const finalArgs = [...parts, ...args];
-    const child = spawn(cmd, finalArgs, { stdio: ['pipe', 'pipe', 'pipe'], shell: false });
+    execFile(
+      '/usr/local/bin/buscar-manuales',
+      [query],
+      {
+        timeout: 60000,
+        maxBuffer: 1024 * 1024 * 6,
+        env: {
+          ...process.env,
+          HOME: process.env.HOME || '/root'
+        }
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          const detail = stderr || stdout || error.message;
+          return reject(new Error(detail));
+        }
 
-    let stdout = '';
-    let stderr = '';
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error(`Timeout ejecutando ${cmd}`));
-    }, timeoutMs);
-
-    child.stdout.on('data', d => { stdout += d.toString(); });
-    child.stderr.on('data', d => { stderr += d.toString(); });
-    child.on('error', err => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    child.on('close', code => {
-      clearTimeout(timer);
-      if (code === 0) return resolve(stdout.trim() || 'OK');
-      reject(new Error((stderr || stdout || `Comando terminó con código ${code}`).trim()));
-    });
-
-    if (input) child.stdin.write(input);
-    child.stdin.end();
-  });
-}
-
-function splitCommand(str) {
-  // Parser sencillo para comandos con comillas básicas.
-  const out = [];
-  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
-  let m;
-  while ((m = re.exec(str))) out.push(m[1] || m[2] || m[3]);
-  return out;
-}
-
-function sendToOpenClawWS(message) {
-  return new Promise((resolve, reject) => {
-    let ws;
-    let settled = false;
-    let responseChunks = [];
-    const timeout = setTimeout(() => finish(new Error('Timeout esperando respuesta de OpenClaw')), 60000);
-
-    function finish(err, value) {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      try { ws?.close(); } catch {}
-      if (err) reject(err);
-      else resolve((value || responseChunks.join('') || 'OK').trim());
-    }
-
-    try {
-      ws = new WebSocket(OPENCLAW_WS);
-    } catch (e) {
-      return finish(new Error('No se pudo crear conexión WebSocket'));
-    }
-
-    ws.on('open', () => {
-      // Probamos un formato conservador, pero puede que tu OpenClaw necesite otro adaptador.
-      ws.send(JSON.stringify({
-        type: 'message',
-        content: message,
-        channel: 'app',
-        source: 'openclaw-app'
-      }));
-    });
-
-    ws.on('message', data => {
-      const raw = data.toString();
-      try {
-        const parsed = JSON.parse(raw);
-        if (parsed.error) return finish(new Error(String(parsed.error)));
-        const piece = parsed.content || parsed.response || parsed.text || parsed.message || '';
-        if (piece) responseChunks.push(String(piece));
-        if (parsed.type === 'response' && piece) return finish(null, String(piece));
-        if (parsed.type === 'done' || parsed.done === true || parsed.final === true) return finish(null);
-      } catch {
-        responseChunks.push(raw);
+        resolve(stdout || '');
       }
-    });
-
-    ws.on('error', err => finish(new Error(`WebSocket error: ${err.message}`)));
-    ws.on('close', () => {
-      if (!settled && responseChunks.length) finish(null);
-      else if (!settled) finish(new Error('OpenClaw cerró la conexión sin respuesta'));
-    });
+    );
   });
 }
 
-function probeOpenClaw(timeoutMs) {
-  return new Promise(resolve => {
-    let ws;
-    let done = false;
-    const timer = setTimeout(() => finish(false, 'timeout'), timeoutMs);
-    function finish(ok, detail) {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      try { ws?.close(); } catch {}
-      resolve({ reachable: ok, url: OPENCLAW_WS, detail });
-    }
-    try {
-      ws = new WebSocket(OPENCLAW_WS);
-      ws.on('open', () => finish(true, 'connect ok'));
-      ws.on('error', err => finish(false, err.message));
-    } catch (err) {
-      finish(false, err.message);
-    }
+function sendToOpenClaw(message) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      OPENCLAW_BIN,
+      ['agent', '--agent', OPENCLAW_AGENT, '--message', message],
+      {
+        timeout: COMMAND_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024 * 8,
+        env: {
+          ...process.env,
+          HOME: process.env.HOME || '/root'
+        }
+      },
+      (error, stdout, stderr) => {
+        const cleanStdout = cleanOpenClawOutput(stdout || '');
+        const cleanStderr = cleanOpenClawOutput(stderr || '');
+
+        if (error) {
+          const detail = cleanStderr || cleanStdout || error.message;
+          return reject(new Error(detail));
+        }
+
+        const reply = cleanStdout || cleanStderr;
+        if (!reply) {
+          return reject(new Error('OpenClaw no devolvió respuesta'));
+        }
+
+        resolve(reply);
+      }
+    );
   });
 }
 
-app.use((_req, res) => res.status(404).json({ ok: false, error: 'Ruta no encontrada' }));
+function cleanOpenClawOutput(output) {
+  if (!output) return '';
 
-app.listen(PORT, LISTEN_HOST, () => {
-  console.log(`agent-api corriendo en http://${LISTEN_HOST}:${PORT}`);
-  console.log(`Modo: ${AGENT_COMMAND ? `command (${AGENT_COMMAND})` : `websocket (${OPENCLAW_WS})`}`);
+  let text = output
+    .replace(/\u001b\[[0-9;]*m/g, '')
+    .replace(/\r/g, '')
+    .trim();
+
+  const marker = text.lastIndexOf('◇');
+  if (marker !== -1) {
+    text = text.slice(marker + 1).trim();
+  }
+
+  const lines = text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(line => !line.startsWith('🦞 OpenClaw'))
+    .filter(line => !line.startsWith('│'));
+
+  return lines.join('\n').trim();
+}
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`agent-api corriendo en http://127.0.0.1:${PORT}`);
+  console.log(`OpenClaw CLI: ${OPENCLAW_BIN} agent --agent ${OPENCLAW_AGENT}`);
+  console.log('Listo para recibir peticiones.');
 });
+
