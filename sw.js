@@ -1,4 +1,4 @@
-const CACHE = 'agente-personal-v2';
+const CACHE = 'agente-personal-v3-manuales';
 const ASSETS = [
   '/',
   '/index.html',
