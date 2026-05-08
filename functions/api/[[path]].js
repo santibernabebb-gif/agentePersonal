@@ -2,7 +2,7 @@
  * Cloudflare Pages Function: /api/*
  *
  * App -> /api/auth -> sesión firmada
- * App -> /api/chat|health|skills|remind -> proxy seguro al VPS
+ * App -> /api/chat|manuales|health|skills|remind -> proxy seguro al VPS
  *
  * Variables en Cloudflare Pages:
  *   OC_USER            usuario de la app
@@ -20,7 +20,7 @@ const CORS = {
   'Cache-Control': 'no-store'
 };
 
-const ALLOWED_PROXY = new Set(['/health', '/chat', '/skills', '/remind']);
+const ALLOWED_PROXY = new Set(['/health', '/chat', '/manuales', '/skills', '/remind']);
 
 export async function onRequest(context) {
   const { request, env } = context;
